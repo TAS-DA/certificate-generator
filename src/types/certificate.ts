@@ -177,14 +177,17 @@ export interface FieldMapping {
 
 export interface GeneratedCertificate {
   id: string;
-  batchId: string;
-  recordId: string;
+  batchId?: string;
+  recordId?: string;
+  rowIndex?: number;
   rowNumber: number;
   primaryName: string;
-  certificateId: string;
+  displayName?: string;
+  certificateId?: string;
   filename: string;
+  blob?: Blob;
   pdfBlob?: Blob;
-  status: 'pending' | 'success' | 'failed';
+  status: 'generated' | 'success' | 'failed';
   error?: string;
 }
 

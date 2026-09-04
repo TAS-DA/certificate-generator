@@ -1,7 +1,5 @@
 import JSZip from 'jszip';
-import { saveAs } from 'file-saver';
 import type { CertificateBatch, GeneratedCertificate } from '../types/certificate';
-import { dbService } from './db';
 
 /**
  * Sanitizes a string to be a safe OS file name.
@@ -62,7 +60,7 @@ export function deduplicateFilenames(certificates: GeneratedCertificate[]): Map<
   const seenCounts = new Map<string, number>();
 
   for (const cert of certificates) {
-    let rawName = cert.filename || `certificate_${String(cert.rowNumber).padStart(3, '0')}.pdf`;
+    let rawName = cert.filename || `certificate_${String(cert.rowNumber || 1).padStart(3, '0')}.pdf`;
     if (!rawName.toLowerCase().endsWith('.pdf')) {
       rawName += '.pdf';
     }
@@ -79,80 +77,115 @@ export function deduplicateFilenames(certificates: GeneratedCertificate[]): Map<
 }
 
 /**
- * Generates and downloads a ZIP file containing all successful PDF certificates for a batch.
+ * Immediately triggers browser download of an individual PDF certificate from memory.
  */
-export async function downloadBatchZip(
-  batchOrId: CertificateBatch | string, 
-  batchName?: string, 
-  certificates?: GeneratedCertificate[]
-): Promise<void> {
-  let batchId: string;
-  let name: string;
-  let certList: GeneratedCertificate[];
-
-  if (typeof batchOrId === 'object') {
-    batchId = batchOrId.id;
-    name = batchOrId.name;
-    certList = batchOrId.generatedCertificates || [];
-  } else {
-    batchId = batchOrId;
-    name = batchName || 'Certificate_Batch';
-    certList = certificates || [];
-  }
-
-  const zip = new JSZip();
-  const pdfBlobs = await dbService.getAllPdfBlobsForBatch(batchId);
-  const blobMap = new Map<string, Blob>();
-  pdfBlobs.forEach(item => blobMap.set(item.generatedId, item.pdfBlob));
-
-  const successfulCerts = certList.filter(c => c.status === 'success');
-  if (successfulCerts.length === 0 && pdfBlobs.length === 0) {
-    alert('No generated certificates are available in this batch to download.');
+export function downloadCertificate(certificate: GeneratedCertificate): void {
+  if (certificate.status !== 'generated' && certificate.status !== 'success') {
     return;
   }
 
-  const filenameMap = deduplicateFilenames(successfulCerts.length > 0 ? successfulCerts : pdfBlobs.map(p => ({
-    id: p.generatedId,
-    batchId,
-    recordId: p.recordId,
-    rowNumber: 1,
-    primaryName: p.filename,
-    certificateId: p.recordId,
-    filename: p.filename,
-    status: 'success' as const
-  })));
-
-  if (successfulCerts.length > 0) {
-    for (const cert of successfulCerts) {
-      const blob = blobMap.get(cert.id);
-      if (blob) {
-        const finalFilename = filenameMap.get(cert.id) || cert.filename;
-        zip.file(finalFilename, blob);
-      }
-    }
-  } else {
-    for (const item of pdfBlobs) {
-      zip.file(item.filename, item.pdfBlob);
-    }
-  }
-
-  const zipContent = await zip.generateAsync({ type: 'blob' });
-  const cleanBatchName = sanitizeFilename(name || 'Certificate_Batch');
-  saveAs(zipContent, `${cleanBatchName}.zip`);
-}
-
-/**
- * Downloads an individual single PDF certificate blob
- */
-export async function downloadSinglePdf(generatedCertId: string, defaultFilename: string): Promise<void> {
-  const blob = await dbService.getPdfBlob(generatedCertId);
-  if (!blob) {
-    alert('PDF binary for this certificate record was not found in storage.');
+  const blob = certificate.blob || certificate.pdfBlob;
+  if (!blob || blob.size === 0) {
+    console.warn('PDF Blob is missing or empty for certificate:', certificate.filename);
     return;
   }
-  let filename = sanitizeFilename(defaultFilename);
+
+  let filename = sanitizeFilename(certificate.filename || 'certificate.pdf');
   if (!filename.toLowerCase().endsWith('.pdf')) {
     filename += '.pdf';
   }
-  saveAs(blob, filename);
+
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 1000);
 }
+
+/**
+ * Backwards compatibility helper for downloading a single PDF
+ */
+export function downloadSinglePdf(certOrBlob: GeneratedCertificate | Blob | string, defaultFilename?: string): void {
+  if (certOrBlob instanceof Blob) {
+    const url = URL.createObjectURL(certOrBlob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    let filename = sanitizeFilename(defaultFilename || 'certificate.pdf');
+    if (!filename.toLowerCase().endsWith('.pdf')) filename += '.pdf';
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } else if (typeof certOrBlob === 'object' && certOrBlob !== null) {
+    downloadCertificate(certOrBlob);
+  }
+}
+
+/**
+ * Downloads all successful generated certificates in memory as a ZIP package.
+ */
+export async function downloadAllAsZip(
+  certificates: GeneratedCertificate[], 
+  batchName: string = 'Certificates'
+): Promise<void> {
+  const successful = certificates.filter(
+    item => (item.status === 'generated' || item.status === 'success') && (item.blob || item.pdfBlob)
+  );
+
+  if (successful.length === 0) {
+    return;
+  }
+
+  const zip = new JSZip();
+  const filenameMap = deduplicateFilenames(successful);
+
+  for (const cert of successful) {
+    const blob = cert.blob || cert.pdfBlob;
+    if (blob && blob.size > 0) {
+      const finalFilename = filenameMap.get(cert.id) || cert.filename;
+      zip.file(finalFilename, blob);
+    }
+  }
+
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(zipBlob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  let cleanName = sanitizeFilename(batchName || 'Certificates');
+  anchor.download = `${cleanName}.zip`;
+
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 1000);
+}
+
+/**
+ * Backwards compatibility helper for ZIP package downloads
+ */
+export async function downloadBatchZip(
+  batchOrCerts: CertificateBatch | GeneratedCertificate[] | string,
+  batchName?: string,
+  certificates?: GeneratedCertificate[]
+): Promise<void> {
+  if (Array.isArray(batchOrCerts)) {
+    return downloadAllAsZip(batchOrCerts, batchName || 'Certificates');
+  } else if (typeof batchOrCerts === 'object' && batchOrCerts !== null) {
+    const certs = batchOrCerts.generatedCertificates || [];
+    return downloadAllAsZip(certs, batchOrCerts.name || 'Certificates');
+  } else if (typeof batchOrCerts === 'string') {
+    return downloadAllAsZip(certificates || [], batchName || 'Certificates');
+  }
+}
+

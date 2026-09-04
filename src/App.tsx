@@ -516,6 +516,7 @@ export function App() {
     if (!activeBatch || !activeBatch.spreadsheet || !activeBatch.template) return;
     setIsGenerating(true);
     setGenProgress({ completed: 0, total: activeBatch.spreadsheet.totalRows });
+    setCancelGen(false);
 
     const rows = activeBatch.spreadsheet.rows;
     const generatedList: GeneratedCertificate[] = [];
@@ -533,33 +534,42 @@ export function App() {
 
       try {
         const pdfBlob = await generateSingleCertificatePdf(templateObj, fields, row);
-        const filename = generateFilenameFromPattern(activeBatch.filenamePattern || '{{Name}}', row, i + 1) + '.pdf';
-        
-        await dbService.savePdfBlob(activeBatch.id, genId, certId, pdfBlob, filename);
+        const filename = generateFilenameFromPattern(activeBatch.filenamePattern || '{{Name}}', row, i + 1);
 
         generatedList.push({
           id: genId,
           batchId: activeBatch.id,
           recordId: certId,
+          rowIndex: i,
           rowNumber: i + 1,
           primaryName,
+          displayName: primaryName,
           certificateId: certId,
           filename,
-          pdfBlob,
-          status: 'success',
+          blob: pdfBlob,
+          pdfBlob: pdfBlob,
+          status: 'generated',
         });
       } catch (err: any) {
         generatedList.push({
           id: genId,
           batchId: activeBatch.id,
           recordId: certId,
+          rowIndex: i,
           rowNumber: i + 1,
           primaryName,
+          displayName: primaryName,
           certificateId: certId,
           filename: `Error_Row_${i + 1}.pdf`,
+          blob: new Blob(),
+          pdfBlob: new Blob(),
           status: 'failed',
           error: err.message || 'PDF Generation Error',
         });
+      }
+
+      if (i % 5 === 0) {
+        await new Promise((r) => setTimeout(r, 0));
       }
     }
 
@@ -571,7 +581,6 @@ export function App() {
 
     setActiveBatch(finalBatch);
     setBatches((prev) => [finalBatch, ...prev.filter((b) => b.id !== finalBatch.id)]);
-    await dbService.saveBatch(finalBatch);
     setIsGenerating(false);
     setShowPreGenModal(false);
     setBulkStep(7);
@@ -838,6 +847,30 @@ export function App() {
             {/* Step 4: Preview Real Records */}
             {bulkStep === 4 && activeBatch?.spreadsheet && activeTemplate && (
               <div className="space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Preview & Generate Certificates</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Verify your field mappings against real spreadsheet records before starting bulk generation.
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <button
+                      onClick={() => setBulkStep(3)}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer border border-slate-300"
+                    >
+                      Back to Mapping
+                    </button>
+                    <button
+                      onClick={() => setShowPreGenModal(true)}
+                      className="inline-flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm px-6 py-2.5 rounded-xl shadow-md transition-all cursor-pointer"
+                    >
+                      <Zap className="w-4 h-4 text-amber-300" />
+                      <span>Generate {activeBatch.spreadsheet.totalRows} Certificates</span>
+                    </button>
+                  </div>
+                </div>
+
                 <PreviewModeBar
                   isPreviewMode={isPreviewMode}
                   onTogglePreviewMode={setIsPreviewMode}
@@ -868,7 +901,11 @@ export function App() {
               <ResultsView
                 batch={activeBatch}
                 onRetryFailed={handleStartBulkGeneration}
-                onBackToEditor={() => setActiveTab('designer')}
+                onBackToEditor={() => setBulkStep(4)}
+                onClearResults={() => {
+                  setActiveBatch({ ...activeBatch, generatedCertificates: [] });
+                  setBulkStep(4);
+                }}
               />
             )}
 
