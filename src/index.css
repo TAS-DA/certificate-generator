@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans antialiased selection:bg-indigo-500 selection:text-white;
+  }
+}
+
+/* Canvas & Template Editor Custom Styling */
+.certificate-canvas-container {
+  background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.field-handle {
+  width: 10px;
+  height: 10px;
+  background-color: #3b82f6;
+  border: 2px solid white;
+  border-radius: 50%;
+  position: absolute;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.field-handle-nw { top: -5px; left: -5px; cursor: nwse-resize; }
+.field-handle-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+.field-handle-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+.field-handle-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
+
+.alignment-guide-h {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  border-top: 1px dashed #ef4444;
+  pointer-events: none;
+  z-index: 99;
+}
+
+.alignment-guide-v {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  border-left: 1px dashed #ef4444;
+  pointer-events: none;
+  z-index: 99;
+}
